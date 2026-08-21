@@ -46,6 +46,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import {
   Tooltip,
@@ -54,7 +55,7 @@ import {
 } from "@/components/ui/tooltip";
 import { requireApiSuccess } from "@/lib/api-client";
 import { toast } from "sonner";
-import { BookText, EllipsisVertical, Loader } from "lucide-react";
+import { BookText, Check, Copy, EllipsisVertical, Loader } from "lucide-react";
 
 type Collaborator = {
   id: number;
@@ -66,6 +67,17 @@ type AddCollaboratorState = {
   error?: string;
   errors?: string[];
   data?: Collaborator[];
+  inviteUrls?: Array<{ email: string; url: string }>;
+};
+
+const copyInviteUrl = async (url: string) => {
+  try {
+    await navigator.clipboard.writeText(url);
+    return true;
+  } catch {
+    window.prompt("Copy invitation link:", url);
+    return false;
+  }
 };
 
 function InviteCollaboratorsDialog({
@@ -81,6 +93,8 @@ function InviteCollaboratorsDialog({
   triggerLabel,
   triggerVariant = "outline",
   triggerSize = "default",
+  inviteUrls,
+  onDone,
 }: {
   owner: string;
   repo: string;
@@ -94,7 +108,10 @@ function InviteCollaboratorsDialog({
   triggerLabel?: string;
   triggerVariant?: "default" | "outline";
   triggerSize?: "default" | "sm";
+  inviteUrls: Array<{ email: string; url: string }>;
+  onDone: () => void;
 }) {
+  const [copiedUrl, setCopiedUrl] = useState<string | null>(null);
   const parsedInviteEmails = useMemo(() => {
     return Array.from(
       new Set(
@@ -117,35 +134,79 @@ function InviteCollaboratorsDialog({
         <DialogHeader>
           <DialogTitle>Invite collaborators</DialogTitle>
           <DialogDescription>
-            Enter one or multiple email addresses, separated by commas or new
-            lines.
+            {inviteUrls.length > 0
+              ? "Copy each private invitation link and send it to the matching collaborator."
+              : "Enter one or multiple email addresses, separated by commas or new lines."}
           </DialogDescription>
         </DialogHeader>
-        <form action={action} className="space-y-4">
-          <input type="hidden" name="owner" value={owner} />
-          <input type="hidden" name="repo" value={repo} />
-          <Textarea
-            name="emails"
-            placeholder="alice@example.com, bob@example.com"
-            value={value}
-            onChange={(event) => onValueChange(event.target.value)}
-            required
-            rows={6}
-          />
-          {state?.error ? (
-            <p className="text-sm font-medium text-destructive">
-              {state.error}
+        {inviteUrls.length > 0 ? (
+          <div className="space-y-4">
+            <div className="space-y-3">
+              {inviteUrls.map((invite) => (
+                <div key={invite.url} className="space-y-1.5">
+                  <div className="text-sm font-medium">{invite.email}</div>
+                  <div className="flex gap-2">
+                    <Input
+                      value={invite.url}
+                      readOnly
+                      aria-label={`Invitation link for ${invite.email}`}
+                    />
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="icon"
+                      onClick={async () => {
+                        const copied = await copyInviteUrl(invite.url);
+                        if (copied) {
+                          setCopiedUrl(invite.url);
+                          toast.success("Invitation link copied.");
+                        }
+                      }}
+                    >
+                      {copiedUrl === invite.url ? <Check /> : <Copy />}
+                      <span className="sr-only">Copy invitation link</span>
+                    </Button>
+                  </div>
+                </div>
+              ))}
+            </div>
+            <p className="text-xs text-muted-foreground">
+              Each link is single-use and should only be shared with its
+              intended recipient.
             </p>
-          ) : null}
-          <DialogFooter>
-            <SubmitButton
-              type="submit"
-              disabled={parsedInviteEmails.length === 0}
-            >
-              Send invite{parsedInviteEmails.length > 1 ? "s" : ""}
-            </SubmitButton>
-          </DialogFooter>
-        </form>
+            <DialogFooter>
+              <Button type="button" onClick={onDone}>
+                Done
+              </Button>
+            </DialogFooter>
+          </div>
+        ) : (
+          <form action={action} className="space-y-4">
+            <input type="hidden" name="owner" value={owner} />
+            <input type="hidden" name="repo" value={repo} />
+            <Textarea
+              name="emails"
+              placeholder="alice@example.com, bob@example.com"
+              value={value}
+              onChange={(event) => onValueChange(event.target.value)}
+              required
+              rows={6}
+            />
+            {state?.error ? (
+              <p className="text-sm font-medium text-destructive">
+                {state.error}
+              </p>
+            ) : null}
+            <DialogFooter>
+              <SubmitButton
+                type="submit"
+                disabled={parsedInviteEmails.length === 0}
+              >
+                Send invite{parsedInviteEmails.length > 1 ? "s" : ""}
+              </SubmitButton>
+            </DialogFooter>
+          </form>
+        )}
       </DialogContent>
     </Dialog>
   );
@@ -167,6 +228,9 @@ export function Collaborators({
   >(handleAddCollaborator, {});
   const [emails, setEmails] = useState("");
   const [inviteDialogOpen, setInviteDialogOpen] = useState(false);
+  const [inviteUrls, setInviteUrls] = useState<
+    Array<{ email: string; url: string }>
+  >([]);
   const [removing, setRemoving] = useState<number[]>([]);
   const [resending, setResending] = useState<number[]>([]);
   const [pendingRemoveId, setPendingRemoveId] = useState<number | null>(null);
@@ -241,7 +305,12 @@ export function Collaborators({
         });
       }
       setEmails("");
-      setInviteDialogOpen(false);
+      if (addCollaboratorState.inviteUrls?.length) {
+        setInviteUrls(addCollaboratorState.inviteUrls);
+        setInviteDialogOpen(true);
+      } else {
+        setInviteDialogOpen(false);
+      }
     }
   }, [addCollaboratorState, addNewCollaborator]);
 
@@ -283,7 +352,16 @@ export function Collaborators({
       if (resent.error) {
         toast.error(resent.error);
       } else {
-        toast.success(resent.message);
+        if ("inviteUrl" in resent && resent.inviteUrl) {
+          const copied = await copyInviteUrl(resent.inviteUrl);
+          toast.success(
+            copied
+              ? `${resent.message} The link was copied to your clipboard.`
+              : resent.message,
+          );
+        } else {
+          toast.success(resent.message);
+        }
       }
     } catch (err: any) {
       toast.error(err.message);
@@ -327,12 +405,20 @@ export function Collaborators({
             state={addCollaboratorState}
             action={addCollaboratorAction}
             open={inviteDialogOpen}
-            onOpenChange={setInviteDialogOpen}
+            onOpenChange={(open) => {
+              setInviteDialogOpen(open);
+              if (!open) setInviteUrls([]);
+            }}
             value={emails}
             onValueChange={setEmails}
             disabled={isLoading}
             triggerVariant="default"
             triggerSize="default"
+            inviteUrls={inviteUrls}
+            onDone={() => {
+              setInviteDialogOpen(false);
+              setInviteUrls([]);
+            }}
           />
         ) : null}
       </div>
@@ -344,6 +430,7 @@ export function Collaborators({
     emails,
     error,
     inviteDialogOpen,
+    inviteUrls,
     isLoading,
     owner,
     repo,
@@ -514,13 +601,21 @@ export function Collaborators({
                 state={addCollaboratorState}
                 action={addCollaboratorAction}
                 open={inviteDialogOpen}
-                onOpenChange={setInviteDialogOpen}
+                onOpenChange={(open) => {
+                  setInviteDialogOpen(open);
+                  if (!open) setInviteUrls([]);
+                }}
                 value={emails}
                 onValueChange={setEmails}
                 disabled={isLoading}
                 triggerLabel="Invite a collaborator"
                 triggerVariant="default"
                 triggerSize="default"
+                inviteUrls={inviteUrls}
+                onDone={() => {
+                  setInviteDialogOpen(false);
+                  setInviteUrls([]);
+                }}
               />
             </EmptyContent>
           </Empty>

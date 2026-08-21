@@ -11,10 +11,15 @@ import { sendEmail } from "@/lib/mailer";
 import { getBaseUrl } from "@/lib/base-url";
 import { db } from "@/db";
 import { and, eq, sql } from "drizzle-orm";
-import { collaboratorInviteTable, collaboratorTable } from "@/db/schema";
+import {
+  accountTable,
+  collaboratorInviteTable,
+  collaboratorTable,
+} from "@/db/schema";
 import { z } from "zod";
 import { randomBytes } from "crypto";
 import { findVerifiedUserByEmail, normalizeEmail } from "@/lib/collaborator-access";
+import { isManualPasswordCollaboratorAuthEnabled } from "@/lib/manual-password-collaborators";
 
 const parseInviteEmails = (raw: FormDataEntryValue | null) => {
   const value = typeof raw === "string" ? raw : "";
@@ -138,8 +143,10 @@ const handleAddCollaborator = async (prevState: any, formData: FormData) => {
     const { repoAccess, installation } = await assertRepoInInstallation(user, owner, repo);
 
 		const baseUrl = getBaseUrl();
+    const manualPasswordMode = isManualPasswordCollaboratorAuthEnabled();
     const repoUrl = new URL(`/${owner}/${repo}`, baseUrl).toString();
     const createdCollaborators: (typeof collaboratorTable.$inferSelect)[] = [];
+    const inviteUrls: Array<{ email: string; url: string }> = [];
     const errors: string[] = [];
     let immediateAccessCount = 0;
     let pendingInviteCount = 0;
@@ -147,6 +154,16 @@ const handleAddCollaborator = async (prevState: any, formData: FormData) => {
     for (const email of emails) {
       const normalizedEmail = normalizeEmail(email);
       const existingUser = await findVerifiedUserByEmail(normalizedEmail);
+      const existingCredential = existingUser && manualPasswordMode
+        ? await db.query.accountTable.findFirst({
+            where: and(
+              eq(accountTable.userId, existingUser.id),
+              eq(accountTable.providerId, "credential"),
+            ),
+          })
+        : null;
+      const requiresManualActivation =
+        manualPasswordMode && (!existingUser || !existingCredential);
       const collaborator = await db.query.collaboratorTable.findFirst({
 				where: and(
         eq(collaboratorTable.ownerId, repoAccess.ownerId),
@@ -169,14 +186,16 @@ const handleAddCollaborator = async (prevState: any, formData: FormData) => {
         continue;
       }
 
-      if (!existingUser) {
+      if (!existingUser || requiresManualActivation) {
         const inviteUrl = await createCollaboratorInviteUrl({
           email: normalizedEmail,
           owner,
           repo,
           baseUrl,
         });
-        try {
+        if (manualPasswordMode) {
+          inviteUrls.push({ email: normalizedEmail, url: inviteUrl });
+        } else try {
           const html = await render(
             InviteEmailTemplate({
               inviteUrl,
@@ -196,7 +215,7 @@ const handleAddCollaborator = async (prevState: any, formData: FormData) => {
           errors.push(`${normalizedEmail}: ${error.message}`);
           continue;
         }
-      } else {
+      } else if (!manualPasswordMode) {
         try {
           const html = await render(
             CollaboratorAddedEmailTemplate({
@@ -232,10 +251,10 @@ const handleAddCollaborator = async (prevState: any, formData: FormData) => {
 
       if (inserted.length > 0) {
         createdCollaborators.push(...inserted);
-        if (existingUser) {
-          immediateAccessCount += 1;
-        } else {
+        if (requiresManualActivation || !existingUser) {
           pendingInviteCount += 1;
+        } else {
+          immediateAccessCount += 1;
         }
       }
     }
@@ -251,9 +270,14 @@ const handleAddCollaborator = async (prevState: any, formData: FormData) => {
           : immediateAccessCount > 0
             ? `${immediateAccessCount} collaborator${immediateAccessCount === 1 ? "" : "s"} added to "${owner}/${repo}".`
             : pendingInviteCount === 1
-              ? `${createdCollaborators[0].email} invited to "${owner}/${repo}".`
-              : `${pendingInviteCount} collaborators invited to "${owner}/${repo}".`,
+              ? manualPasswordMode
+                ? `Invitation link created for ${createdCollaborators[0].email}.`
+                : `${createdCollaborators[0].email} invited to "${owner}/${repo}".`
+              : manualPasswordMode
+                ? `${pendingInviteCount} invitation links created for "${owner}/${repo}".`
+                : `${pendingInviteCount} collaborators invited to "${owner}/${repo}".`,
 			data: createdCollaborators,
+      inviteUrls,
       errors
 		};
 	} catch (error: any) {
@@ -325,6 +349,13 @@ const handleResendCollaboratorInvite = async (collaboratorId: number, owner: str
       repo,
       baseUrl,
     });
+
+    if (isManualPasswordCollaboratorAuthEnabled()) {
+      return {
+        message: `A new invitation link was created for ${collaborator.email}.`,
+        inviteUrl,
+      };
+    }
 
     const html = await render(
       InviteEmailTemplate({

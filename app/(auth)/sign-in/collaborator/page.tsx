@@ -1,5 +1,7 @@
 import { InviteSignIn } from "@/components/invite-sign-in";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
+import { CollaboratorPasswordActivation } from "@/components/collaborator-password-activation";
+import { isManualPasswordCollaboratorAuthEnabled } from "@/lib/manual-password-collaborators";
 
 export default async function Page({
   searchParams,
@@ -19,5 +21,9 @@ export default async function Page({
     );
   }
 
-  return <InviteSignIn token={token.trim()} />;
+  return isManualPasswordCollaboratorAuthEnabled() ? (
+    <CollaboratorPasswordActivation token={token.trim()} />
+  ) : (
+    <InviteSignIn token={token.trim()} />
+  );
 }

@@ -10,8 +10,9 @@ import { OtpVerificationForm } from "@/components/otp-verification-form";
 import { toast } from "sonner";
 import { Loader } from "lucide-react";
 
-export function SignIn() {
+export function SignIn({ passwordMode = false }: { passwordMode?: boolean }) {
   const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
   const [otp, setOtp] = useState("");
   const [step, setStep] = useState<"email" | "otp">("email");
   const [submittingMethod, setSubmittingMethod] = useState<
@@ -102,6 +103,33 @@ export function SignIn() {
     }
   };
 
+  const handlePasswordSignIn = async () => {
+    const normalizedEmail = email.trim().toLowerCase();
+    if (!normalizedEmail || !password) {
+      toast.error("Enter your email and password.");
+      return;
+    }
+
+    setSubmittingMethod("email");
+    try {
+      const result = await signIn.email({
+        email: normalizedEmail,
+        password,
+      });
+
+      if (result.error?.message) {
+        toast.error(result.error.message);
+        return;
+      }
+
+      window.location.assign(safeRedirect);
+    } catch (error: any) {
+      toast.error(error?.message || "Could not sign in with email and password.");
+    } finally {
+      setSubmittingMethod(null);
+    }
+  };
+
   const handleOtpSignIn = async () => {
     if (otp.length !== 6) {
       toast.error("Enter the 6-digit code.");
@@ -156,7 +184,7 @@ export function SignIn() {
   return (
     <div className="min-h-screen p-4 md:p-6 flex justify-center items-center">
       <div className="sm:max-w-[340px] w-full">
-        {step === "otp" ? (
+        {!passwordMode && step === "otp" ? (
           <div className="space-y-6">
             <OtpVerificationForm
               busy={isSubmitting}
@@ -212,7 +240,11 @@ export function SignIn() {
               className="space-y-2"
               onSubmit={async (event) => {
                 event.preventDefault();
-                await handleEmailSignIn();
+                if (passwordMode) {
+                  await handlePasswordSignIn();
+                } else {
+                  await handleEmailSignIn();
+                }
               }}
             >
               <Input
@@ -224,8 +256,20 @@ export function SignIn() {
                 value={email}
                 onChange={(event) => setEmail(event.target.value)}
               />
+              {passwordMode ? (
+                <Input
+                  type="password"
+                  name="password"
+                  autoComplete="current-password"
+                  placeholder="Password"
+                  required
+                  disabled={isSubmitting}
+                  value={password}
+                  onChange={(event) => setPassword(event.target.value)}
+                />
+              ) : null}
               <Button type="submit" className="w-full" disabled={isSubmitting}>
-                Continue with email
+                {passwordMode ? "Sign in with password" : "Continue with email"}
                 {submittingMethod === "email" && (
                   <Loader className="size-4 animate-spin" />
                 )}

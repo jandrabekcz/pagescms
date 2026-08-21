@@ -11,6 +11,10 @@ import { syncGithubProfileOnLogin } from "@/lib/github-account";
 import { bindCollaboratorInvitesToUser } from "@/lib/collaborator-access";
 import { LoginEmailTemplate } from "@/components/email/login";
 import { render } from "@react-email/render";
+import {
+  isManualPasswordCollaboratorAuthEnabled,
+  manualPasswordCollaborators,
+} from "@/lib/manual-password-collaborators";
 
 export const auth = betterAuth({
   baseURL: getBaseUrl(),
@@ -32,6 +36,13 @@ export const auth = betterAuth({
       updateUserInfoOnLink: true,
       allowUnlinkingAll: false,
     },
+  },
+  emailAndPassword: {
+    enabled: isManualPasswordCollaboratorAuthEnabled(),
+    disableSignUp: true,
+    requireEmailVerification: false,
+    minPasswordLength: 12,
+    maxPasswordLength: 128,
   },
   socialProviders: {
     github: {
@@ -155,6 +166,7 @@ export const auth = betterAuth({
   },
   plugins: [
     nextCookies(),
+    manualPasswordCollaborators(),
     emailOTP({
       expiresIn: 300,
       otpLength: 6,

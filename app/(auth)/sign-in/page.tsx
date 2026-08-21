@@ -3,6 +3,7 @@ import { headers } from "next/headers";
 import { auth } from "@/lib/auth";
 import { SignIn } from "@/components/sign-in";
 import { getSafeRedirect } from "@/lib/auth-redirect";
+import { isManualPasswordCollaboratorAuthEnabled } from "@/lib/manual-password-collaborators";
 
 export default async function Page({
   searchParams,
@@ -17,7 +18,5 @@ export default async function Page({
   const safeRedirect = getSafeRedirect(resolvedSearchParams.redirect);
   if (session?.user) return redirect(safeRedirect === "/sign-in" ? "/" : safeRedirect);
 
-	return (
-    <SignIn/>
-  );
+	return <SignIn passwordMode={isManualPasswordCollaboratorAuthEnabled()} />;
 }
